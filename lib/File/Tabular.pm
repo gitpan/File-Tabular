@@ -1,6 +1,6 @@
 package File::Tabular;
 
-our $VERSION = "0.62"; 
+our $VERSION = "0.63"; 
 
 use strict;
 use warnings;
@@ -931,7 +931,7 @@ sub compileFilter {
 
   my $parser = new Search::QueryParser;
   my $q = $parser->parse($query);
-  return eval 'sub {(' . $self->_cplQ($q, $parser) . ') ? $_[0] : undef;}';
+  return eval 'sub {(' . $self->_cplQ($q) . ') ? $_[0] : undef;}';
 }
 
 
@@ -946,11 +946,10 @@ sub _cplRegex {
 sub _cplQ {
   my $self = shift;
   my $q = shift;
-  my $qp = shift; # queryParser
 
-  my $mandatory = join(" and ", map {$self->_cplSubQ($_, $qp)} @{$q->{'+'}});
-  my $exclude   = join(" or ",  map {$self->_cplSubQ($_, $qp)} @{$q->{'-'}});
-  my $optional  = join(" or ",  map {$self->_cplSubQ($_, $qp)} @{$q->{''}});
+  my $mandatory = join(" and ", map {$self->_cplSubQ($_)} @{$q->{'+'}});
+  my $exclude   = join(" or ",  map {$self->_cplSubQ($_)} @{$q->{'-'}});
+  my $optional  = join(" or ",  map {$self->_cplSubQ($_)} @{$q->{''}});
 
   croak "missing positive criteria in query" if not ($mandatory || $optional);
   my $r = "(" . ($mandatory || $optional) . ")";
@@ -962,7 +961,6 @@ sub _cplQ {
 sub _cplSubQ {
   my $self = shift;
   my $subQ = shift;
-  my $qParser = shift;
 
   for ($subQ->{op}) {
 
@@ -970,7 +968,7 @@ sub _cplSubQ {
     /^\(\)$/ 
       and do {# assert(ref $subQ->{value} eq 'HASH' and not $subQ->{field}) 
 	      #   if DEBUG;
-	      return $self->_cplQ($subQ->{value}, $qParser) ; };
+	      return $self->_cplQ($subQ->{value}); };
 
     # ...or a comparison operator with a word or list of words
 
@@ -1010,10 +1008,10 @@ sub _cplSubQ {
     (/^(!)~$/ or /^()=?~$/)  and return "$1($src =~ m[$subQ->{value}])";
 
     # choose proper comparison according to datatype of $subQ->{value}
-    my $cmp = ($subQ->{value} =~ $qParser->{rxDate}) ? 
+    my $cmp = ($subQ->{value} =~ $self->{rxDate}) ? 
                   "(\$self->{date2str}($src) cmp q{" . 
 		    $self->{date2str}($subQ->{value}) . "})" :
-	      ($subQ->{value} =~ $qParser->{rxNum})  ? 
+	      ($subQ->{value} =~ $self->{rxNum})  ? 
 		  "($src <=> $subQ->{value})" :
                # otherwise
                   "($src cmp q{$subQ->{value}})";

@@ -10,6 +10,8 @@ Revision history for Perl extension File::Tabular.
 
 0.62 09.03.2005 Fixed a bug in _printRow (missing \Q..\E in regexes)
 
+0.63 22.03.2005 Fixed a bug in _cplQ (comparison with $self->{rxDate})
+
 
 
 
