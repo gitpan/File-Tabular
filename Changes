@@ -4,3 +4,11 @@ Revision history for Perl extension File::Tabular.
 	- original version; created by h2xs 1.23 with options
 		-AX -n File::Tabular
 
+0.60 25.02.2005 First CPAN release
+
+0.61 26.02.2005 Removed old and useless dependencies in t/File-Tabular.t
+
+
+
+
+

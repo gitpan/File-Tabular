@@ -1,10 +1,6 @@
 use strict;
 use warnings;
 no warnings 'uninitialized';
-use Win32::FileOp;
-use Carp 'verbose';
-use Data::Dumper;
-use IO::Handle;
 
 use Test::More tests => 23 ;
 

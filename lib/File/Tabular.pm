@@ -1,6 +1,6 @@
 package File::Tabular;
 
-our $VERSION = "0.60"; 
+our $VERSION = "0.61"; 
 
 use strict;
 use warnings;
