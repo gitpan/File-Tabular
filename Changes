@@ -8,6 +8,10 @@ Revision history for Perl extension File::Tabular.
 
 0.61 26.02.2005 Removed old and useless dependencies in t/File-Tabular.t
 
+0.62 09.03.2005 Fixed a bug in _printRow (missing \Q..\E in regexes)
+
+
+
 
 
 

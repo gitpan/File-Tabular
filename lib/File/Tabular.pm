@@ -1,6 +1,6 @@
 package File::Tabular;
 
-our $VERSION = "0.61"; 
+our $VERSION = "0.62"; 
 
 use strict;
 use warnings;
@@ -366,9 +366,9 @@ sub _printRow { # Internal function to print a data row and automatically deal w
     } 
   }
 
-  s/$self->{fieldSep}/$self->{fieldSepRepl}/g foreach @vals;
+  s/\Q$self->{fieldSep}\E/$self->{fieldSepRepl}/ foreach @vals;
   my $line = join $self->{fieldSep}, @vals;
-  $line =~ s/$self->{recordSep}/$self->{recordSepRepl}/g;
+  $line =~ s/\Q$self->{recordSep}\E/$self->{recordSepRepl}/g;
   my $fh = $self->{FH};
   print $fh $line, $self->{recordSep};
 }
