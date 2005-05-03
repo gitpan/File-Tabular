@@ -1,6 +1,6 @@
 package File::Tabular;
 
-our $VERSION = "0.63"; 
+our $VERSION = "0.64"; 
 
 use strict;
 use warnings;
@@ -738,10 +738,11 @@ sub writeKeys {
 
   croak 'writeKeys : missing @keyFields'  if not @_;
 
-  my $clone = bless {%$self};
+  # clone object associated with a temp file
+  my $clone = bless {%$self}; 
   $clone->{journal} = undef;
   $clone->{FH} = undef;  
-  open $clone->{FH}, "+>", undef or croak "no tempfile: $^E";
+  open $clone->{FH}, "+>:crlf", undef or croak "no tempfile: $^E";
 
   seek $self->{FH}, 0, 0; # rewind to start of FILE (not start of DATA)
   copyData($self->{FH}, $clone->{FH});
@@ -850,7 +851,7 @@ sub playJournal {
 
 
 
-=item C<< compileFilter(query) >>
+=item C<< compileFilter(query [, implicitPlus]) >>
 
 Compiles a query into a filter (code reference) that can be passed to
 L</fetchrow> or L</fetchall>.
@@ -868,11 +869,21 @@ splitting into data records.
 
 =item *
 
+a data structure resulting from a previous call to 
+C<Search::QueryParser::parse>
+
+=item *
+
 a string that will be analyzed through C<Search::QueryParser>, and
 then compiled into a filter function. The query string can contain
 boolean combinators, parenthesis, comparison operators,  etc., as 
-documented in L<Search::QueryParser>. Notice that in addition to 
-usual comparison operators, you can also use regular expressions
+documented in L<Search::QueryParser>. The optional second argument
+I<implicitPLus> is passed to C<Search::QueryParser::parse> ;
+if true, an implicit '+' is added in front of every
+query item (therefore the whole query is a big AND).
+
+Notice that in addition to usual comparison operators, 
+you can also use regular expressions
 in queries like
 
   +field1=~'^[abc]+' +field2!~'foobar$'
@@ -926,12 +937,16 @@ parameters C<preMatch> and C<postMatch> in the L</new> method.
 sub compileFilter {
   my $self = shift;
   my $query = shift;
+  my $implicitPlus = shift;
 
   return $self->_cplRegex($query) if ref $query eq 'Regexp';
 
-  my $parser = new Search::QueryParser;
-  my $q = $parser->parse($query);
-  return eval 'sub {(' . $self->_cplQ($q) . ') ? $_[0] : undef;}';
+  unless (ref $query eq 'HASH') { # if HASH, query was already parsed
+    my $parser = new Search::QueryParser;
+    $query = $parser->parse($query, $implicitPlus);
+  }
+
+  return eval 'sub {(' . $self->_cplQ($query) . ') ? $_[0] : undef;}';
 }
 
 

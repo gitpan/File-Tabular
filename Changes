@@ -12,6 +12,14 @@ Revision history for Perl extension File::Tabular.
 
 0.63 22.03.2005 Fixed a bug in _cplQ (comparison with $self->{rxDate})
 
+0.64 03.05.2005 Added argument "implicitPlus" in method compileFilter
+                and possibility to pass a pre-parsed query as argument
+
+                Fixed a bug in writeKeys due to improper layer in temp files
+	        (now forcing 'crlf' layer, "portably open a text file"
+ 		 according to PerlIO manpage)
+
+
 
 
 
