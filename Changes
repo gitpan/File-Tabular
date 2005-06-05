@@ -20,8 +20,18 @@ Revision history for Perl extension File::Tabular.
  		 according to PerlIO manpage)
 
 
-
-
+0.65 05.06.2005 - Added special query "KEY:value" to build a regex that 
+	          searches on the first column.
+	        - Added option "avoidMatchKey" in "new" method
+	        - Added methods: stat, atime, ctime, mtime
+		- Optimized _getField
+	        - Replaced 'readline' by 'read' in copyData
+		- Replaced open("+>") by File::Temp->new for tempfiles
+		- Fixed bug, preMatch/postMatch did not work
+		- Added conditions where preMatch/postMatch will not apply
+                - Apply quotemeta to queries with operator ':'
+		- Changed _cplSubQ for compatibility with 
+	          Search::QueryParser v0.91
 
 
 

@@ -2,7 +2,7 @@ use strict;
 use warnings;
 no warnings 'uninitialized';
 
-use Test::More tests => 23 ;
+use Test::More tests => 30 ;
 
 my $tmpJournal = "tmpJournal.txt";
 
@@ -10,7 +10,8 @@ BEGIN {use_ok("File::Tabular");}
 
 unlink $tmpJournal;
 
-my $f = new File::Tabular("t/htmlEntities.txt");
+my $f = new File::Tabular("t/htmlEntities.txt", 
+			  {avoidMatchKey => 1});
 isa_ok($f, 'File::Tabular', "open DATA");
 
 # fetch first row
@@ -36,6 +37,23 @@ $rows = $f->fetchall(where => '+Description:(+accent -o -*cu* ) -Name=~"^E"');
 
 is($rows->[0]{Name}, 'Agrave', 'Agrave');
 is(scalar(@$rows), 7, 'complex filter n lines');
+$f->rewind;
+
+
+# special query K_E_Y:val 
+$row = $f->fetchrow(where => 'K_E_Y:20');
+ok((not defined($row)), 'did not find key 20');
+$f->rewind;
+$row = $f->fetchrow(where => 'K_E_Y:202');
+is($row->{Name}, 'Ecirc', 'did find key 202');
+$f->rewind;
+
+# do not match key in usual request
+$row = $f->fetchrow(where => '202');
+ok((not defined($row)), 'key 202 not matched by default query');
+$f->rewind;
+$row = $f->fetchrow(where => '~ 202');
+is($row->{Name}, 'Ecirc', 'key 202 matched by regex');
 $f->rewind;
 
 
@@ -128,3 +146,8 @@ $w2->rewind;
 my $rows2 = $w2->fetchall;
 is_deeply($rows, $rows2, "journal");
 
+
+# check stat functions
+ok($f->stat->{size} > 0, "nonempty size");
+ok($f->stat->{mode} > 0, "nonempty block size");
+ok(defined($f->mtime->{hour}), "mtime hour");

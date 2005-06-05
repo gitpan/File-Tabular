@@ -1,6 +1,13 @@
 package File::Tabular;
 
-our $VERSION = "0.64"; 
+# TODO : -optimize _getField (could probably dispense with 
+#                             "mkRecord", call $self->..)
+#        -option "ignoreFirstField" for regex match (ignore technical key)
+#        -BUG : preMatch/postMatch won't work on explicit field searches
+#        -optimize: postpone preMatch/postMatch until display time
+
+
+our $VERSION = "0.65"; 
 
 use strict;
 use warnings;
@@ -11,9 +18,7 @@ use Carp;
 use Fcntl ':flock';
 use Hash::Type;
 use Search::QueryParser;
-
-use Data::Dumper;
-
+use File::Temp;
 
 =head1 NAME
 
@@ -74,6 +79,11 @@ File::Tabular - searching and editing flat tabular files
   # replay the updates on a backup file
   my $bck = new File::Tabular("+<$backupFile");
   $bck->playJournal($journalFile);
+
+  # get info from associated filehandle
+  printf "%d size, %d blocks", $f->stat->{size}, $f->stat->{blocks};
+  my $mtime = $f->mtime;
+  printf "time last modified : %02d:%02d:%02d", @{$mtime}{qw(hour min sec)};
 
 =head1 DESCRIPTION
 
@@ -242,12 +252,35 @@ This will be used by L</compileFilter> to perform appropriate comparisons.
 
 =item preMatch/postMatch
 
-Strings to insert before or after a match when applying a filter
-to fetch rows. 
+Strings to insert before or after a match when filtering rows
+(will only apply to search operator ':' on the whole line, i.e.
+query C<< "foo OR bar" >> will highlight both "foo" and "bar", 
+but query C<< "~ 'foo' OR someField:bar" >>
+will not highlight anything; furthermore, a match-all 
+request containing just '*' will not highlight anything either).
+
+=item avoidMatchKey
+
+If true, searches will avoid to match on the first field. So a request
+like C<< $ft->fetchall(where => '123 OR 456') >> will not find
+the record with key 123, unless the word '123' appears somewhere
+in the other fields. This is useful when queries come from a Web
+application, and we don't want users to match a purely technical
+field. 
+
+This search behaviour will not apply to regex searches. So requests like
+C<< $ft->fetchall(where => qr/\b(123|456)\b/) >> 
+or 
+C<< $ft->fetchall(where => ' ~ 123 OR ~ 456') >> 
+will actually find the record with key 123.
 
 =back
 
 =cut
+
+############################################################
+# CONSTANTS
+############################################################
 
 use constant BUFSIZE => 1 << 21; # 2MB, used in copyData
 
@@ -264,10 +297,21 @@ use constant DEFAULT => {
 		        $y += ($y > 50) ? 1900 : 2000 if $y < 100;
 		        return sprintf "%04d%02d%02d", $y, $m, $d;},
   preMatch      => '',
-  postMatch     => ''
+  postMatch     => '',
+  avoidMatchKey => undef
 };
 
 
+use constant {
+ statType => Hash::Type->new(qw(dev ino mode nlink uid gid rdev size 
+				atime mtime ctime blksize blocks)),
+ timeType => Hash::Type->new(qw(sec min hour mday mon year wday yday isdst))
+};
+
+
+############################################################
+# METHODS
+############################################################
 
 sub new {
   my $class = shift;
@@ -277,7 +321,7 @@ sub new {
   my $self = bless {};
   $self->{$_} = $args->{$_} || DEFAULT->{$_} 
     foreach qw(fieldSep recordSep autoNumField autoNumChar autoNum  
-	       rxDate rxNum date2str preMatch postMatch);
+	       rxDate rxNum date2str preMatch postMatch avoidMatchKey);
 
   # field and record separators
   croak "can't use '%' as field separator" if $self->{fieldSep} =~ /%/;
@@ -340,6 +384,8 @@ sub _open { # because of 'open' funny prototyping, need to decompose args
 }
 
 
+
+
 sub _getLine { 
   my $self = shift;
   local $/ = $self->{recordSep};
@@ -387,12 +433,12 @@ operators, etc., as explained below.
 
 =cut
 
-# _getField($r, $fieldName) 
+# _getField($r, $fieldNumber) 
 # Internal method for lazy creation of a record from a line.
 # Will be called only when a specific field is required.
 # See creation of $r in method 'fetchrow' just below.
 
-sub _getField {  ($_[0]->{record} ||= $_[0]->{mkRecord}($_[0]->{line}))->{$_[1]}; }
+sub _getField {  tied(%{$_[0]->{record} ||= $_[0]->{mkRecord}($_[0]->{line})})->[$_[1]]; }
 
 
 sub fetchrow {
@@ -415,7 +461,7 @@ sub fetchrow {
 
     next if $filter and not $filter->($r);
 
-    $r->{record} ||= $self->{mkRecord}($line);
+    $r->{record} ||= $self->{mkRecord}($r->{line});
 
     if ($self->{autoNumField}) {
       my ($n) = $r->{record}{$self->{autoNumField}} =~ m/(\d+)/;
@@ -560,6 +606,38 @@ returns the list of field names
 
 sub headers { my $self = shift; $self->ht->names; }
 
+=item C<< stat >>
+
+returns a hash ref corresponding to a call of 
+L<stat|perlfunc/stat> on the associated filehandle.
+Keys of the hash have names as documented in
+L<stat|perlfunc/stat>. Ex:
+
+     printf "%d size, %d blocks", $f->stat->{size}, $f->stat->{blocks};
+
+=cut
+
+
+sub stat  {my $self = shift; statType->new(stat($self->{FH}));}
+
+
+=item C<< atime >>, C<< mtime >>, C<< ctime >>
+
+each of these methods returns a hash ref corresponding to a call of 
+L<localtime|perlfunc/localtime> on the last access time, last modified
+time, or last inode change time of the associated filehandle
+(see L<stat|perlfunc/stat> for explanations).
+Keys of the hash have names as documented in
+L<localtime|perlfunc/localtime>. Ex:
+
+  my $mtime = $f->mtime;
+  printf "time last modified : %02d:%02d:%02d", @{$mtime}{qw(hour min sec)};
+
+=cut
+
+sub atime {my $self = shift; timeType->new(localtime(($self->stat->{atime})));}
+sub mtime {my $self = shift; timeType->new(localtime(($self->stat->{mtime})));}
+sub ctime {my $self = shift; timeType->new(localtime(($self->stat->{ctime})));}
 
 =item C<< splices >>
 
@@ -617,6 +695,9 @@ row at line 12.
 The whole collection of splice instructions 
 may also be passed as an array ref instead of a list.
 
+If you intend to fetch rows again after a B<splice>, you
+must L<rewind> the file first.
+
 =cut
 
 
@@ -642,11 +723,9 @@ sub splices {
       $pos = $.; # sync positions (because of test 12 lines below)
     }
     elsif (           # we want to put data in the middle of file and ..
-           not $TMP and                  # there is no tempfile yet and ..
-	    (stat $self->{FH})[7] >      # size of file is bigger ..
-	          $self->{dataStart}) {  # than first dataline
-
-      open $TMP, "+>", undef or croak "no tempfile: $^E";
+           not $TMP and $self->stat->{size} > $self->{dataStart}) { 
+      $TMP = new File::Temp or croak "no tempfile: $^E";
+      binmode($TMP, ":crlf");
 
       $self->rewind;
       copyData($self->{FH}, $TMP);
@@ -729,6 +808,9 @@ values corresponding to those fields are taken and
 joined together through L<$;|perlvar/$;>, and then compared to
 C<key1>, C<key2>, etc.
 
+If you intend to fetch rows again after a B<writeKeys>, you
+must L<rewind> the file first.
+
 =cut
 
 sub writeKeys {
@@ -742,7 +824,8 @@ sub writeKeys {
   my $clone = bless {%$self}; 
   $clone->{journal} = undef;
   $clone->{FH} = undef;  
-  open $clone->{FH}, "+>:crlf", undef or croak "no tempfile: $^E";
+  $clone->{FH} = new File::Temp or croak "no tempfile: $^E";
+  binmode($clone->{FH}, ":crlf");
 
   seek $self->{FH}, 0, 0; # rewind to start of FILE (not start of DATA)
   copyData($self->{FH}, $clone->{FH});
@@ -874,6 +957,14 @@ C<Search::QueryParser::parse>
 
 =item *
 
+a string of shape C<< K_E_Y : value >> (without any spaces before
+or after ':'). This will be compiled into
+a regex matching C<value> in the first column.
+The funny spelling is meant to avoid collision with a real field 
+hypothetically named 'KEY'.
+
+=item *
+
 a string that will be analyzed through C<Search::QueryParser>, and
 then compiled into a filter function. The query string can contain
 boolean combinators, parenthesis, comparison operators,  etc., as 
@@ -942,11 +1033,11 @@ sub compileFilter {
   return $self->_cplRegex($query) if ref $query eq 'Regexp';
 
   unless (ref $query eq 'HASH') { # if HASH, query was already parsed
-    my $parser = new Search::QueryParser;
-    $query = $parser->parse($query, $implicitPlus);
+    $query = Search::QueryParser->new->parse($query, $implicitPlus);
   }
 
-  return eval 'sub {(' . $self->_cplQ($query) . ') ? $_[0] : undef;}';
+  eval 'sub {(' . $self->_cplQ($query) . ') ? $_[0] : undef;}' 
+    or croak $@;
 }
 
 
@@ -955,7 +1046,6 @@ sub _cplRegex {
   my $regex = shift;
   return eval {sub {$_[0]->{line} =~ $regex}};
 }
-
 
 
 sub _cplQ {
@@ -979,29 +1069,43 @@ sub _cplSubQ {
 
   for ($subQ->{op}) {
 
-    # either a list of  subqueries...
+    # Either a list of  subqueries...
     /^\(\)$/ 
       and do {# assert(ref $subQ->{value} eq 'HASH' and not $subQ->{field}) 
 	      #   if DEBUG;
 	      return $self->_cplQ($subQ->{value}); };
 
-    # ...or a comparison operator with a word or list of words
+    # ...or a comparison operator with a word or list of words. 
+    # In that case we need to do some preparation for the source of comparison.
 
     # assert(not ref $subQ->{value} or ref $subQ->{value} eq 'ARRAY') if DEBUG;
 
-    # data to compare : either the whole line or an individual field
-    my $src = $subQ->{field} ? qq{_getField(\$_[0], "$subQ->{field}")} :
-                               qq{\$_[0]->{line}};
+    # Data to compare : either ...
+    my $src = qq{\$_[0]->{line}}; # ... by default, the whole line ;
+    if ($subQ->{field}) {         # ... or an individual field.
+      if ($subQ->{field} eq 'K_E_Y') { # Special pseudo field (in first position) :
+	$subQ->{op} = '~';	       # cheat, replace ':' by a regex operation.
+	$subQ->{value} = "^$subQ->{value}(?:\\Q$self->{fieldSep}\\E|\$)";
+      }
+      else {
+	my $fieldNum = $self->ht->{$subQ->{field}} or
+	  croak "invalid field name $subQ->{field} in request";
+	$src = qq{_getField(\$_[0], $fieldNum)};
+      }
+    }
 
     /^:$/
-      and do {my $s = (ref $subQ->{value} eq 'ARRAY') ? 
-                         join("\\s+", @{$subQ->{value}}) : 
-			 $subQ->{value};
+      and do {my $s = $subQ->{value};
 
-# QUESTION : would it be a good idea to use "quotemeta" for avoiding
-# regex interpretation of characters '(', '[' ?
+	      my $noHighlights =            # no result highlighting if ...
+		$s eq '*'                   # .. request matches anything
+	        || ! ($self->{preMatch} || $self->{postMatch}) 
+		                            # .. or no highlight was requested
+		|| $subQ->{field};          # .. or request is on specific field
 
-	      $s =~ s[\*][\\w*]g; # replace star in word by \w* regex
+	      $s = quotemeta($s);
+	      $s =~ s[(\\\ )+][\\s+]g; # replace spaces by \s+ regex
+	      $s =~ s[\\\*][\\w*]g;    # replace star by \w* regex
 
 	      $s =~ s/з/[зc]/g;
 	      $s =~ s/([бавд])/[a$1]/ig;
@@ -1013,9 +1117,13 @@ sub _cplSubQ {
 
 	      my $wdIni = ($s =~ /^\w/) ? '\b' : '';
 	      my $wdEnd = ($s =~ /\w$/) ? '\b' : '';
-	      return ($self->{preMatch} || $self->{postMatch}) ?
-		"($src =~ s[$wdIni$s$wdEnd][$self->{preMatch}\$&$self->{postMatch}]ig)" :
-		"($src =~ m[$wdIni$s$wdEnd]i)" };
+	      my $lineIni = "";
+	      $lineIni = "(?<!^)" if $self->{avoidMatchKey} and not $subQ->{field};
+	      $s = "$lineIni$wdIni$s$wdEnd";
+
+	      return $noHighlights ? "($src =~ m[$s]i)" :
+		"($src =~ s[$s][$self->{preMatch}\$&$self->{postMatch}]ig)";
+	      };
 
     # for all other ops, $subQ->{value} must be a scalar
     # assert(not ref $subQ->{value}) if DEBUG; 
@@ -1052,8 +1160,8 @@ sub urlEncode {
 
 sub copyData { # copy from one filehandle to another
   my ($f1, $f2) = @_;
-  local $/ = \BUFSIZE;
-  while (my $buf = readline $f1) {print $f2 $buf;}
+  my $buf;
+  while (read $f1, $buf, BUFSIZE) {print $f2 $buf;}
 }
 
 =back
