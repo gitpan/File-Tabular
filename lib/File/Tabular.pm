@@ -2,17 +2,20 @@ package File::Tabular;
 
 # TODO : -optimize _getField (could probably dispense with 
 #                             "mkRecord", call $self->..)
-#        -option "ignoreFirstField" for regex match (ignore technical key)
 #        -BUG : preMatch/postMatch won't work on explicit field searches
 #        -optimize: postpone preMatch/postMatch until display time
+#        -escaping fieldSep : make it optional
+
+#        - synopsis : example of file cloning with select (e.g. year=2004)
 
 
-our $VERSION = "0.65"; 
+
+our $VERSION = "0.67"; 
 
 use strict;
 use warnings;
 no warnings 'uninitialized';
-
+use locale;
 use Carp;
 # use Carp::Assert; # dropped because not really needed and not in Perl core
 use Fcntl ':flock';
@@ -376,11 +379,13 @@ sub new {
 }
 
 
-sub _open { # because of 'open' funny prototyping, need to decompose args
-  return $_[0] = $_[1] if ref $_[1] eq 'GLOB'; # got a filehandle
-  return open($_[0], $_[1], $_[2], @_[3..$#_]) if @_ > 3;
-  return open($_[0], $_[1], $_[2])             if @_ > 2;
-  return open($_[0], $_[1]);                   #otherwise
+sub _open { # stupid : because of 'open' funny prototyping, cannot pass an array directly
+  my $result = (ref $_[1] eq 'GLOB') ? $_[0] = $_[1]                         : 
+               @_ > 3                ? open($_[0], $_[1], $_[2], @_[3..$#_]) :
+               @_ > 2                ? open($_[0], $_[1], $_[2])             : 
+                                       open($_[0], $_[1]);
+  binmode($_[0], ":crlf") if $result; # portably open text file, see PerlIO
+  return $result;
 }
 
 
@@ -1103,9 +1108,10 @@ sub _cplSubQ {
 		                            # .. or no highlight was requested
 		|| $subQ->{field};          # .. or request is on specific field
 
-	      $s = quotemeta($s);
-	      $s =~ s[(\\\ )+][\\s+]g; # replace spaces by \s+ regex
-	      $s =~ s[\\\*][\\w*]g;    # replace star by \w* regex
+	      $s =~ s[\*][\\w*]g;             # replace star by \w* regex
+	      $s =~ s{[\[\]\(\)+?]}{\Q$&\E}g; # escape other regex chars
+	      $s =~ s[\s+][\\s+]g;            # replace spaces by \s+ regex
+
 
 	      $s =~ s/з/[зc]/g;
 	      $s =~ s/([бавд])/[a$1]/ig;
