@@ -10,11 +10,11 @@ package File::Tabular;
 
 
 
-our $VERSION = "0.67"; 
+our $VERSION = "0.70"; 
 
 use strict;
 use warnings;
-no warnings 'uninitialized';
+no  warnings 'uninitialized';
 use locale;
 use Carp;
 # use Carp::Assert; # dropped because not really needed and not in Perl core
@@ -243,9 +243,9 @@ Ref to a function for transforming dates into strings
 suitable for sorting (i.e. year-month-day).
 Default is :
 
-  sub {my ($d, $m, $y) = split /\./, $_[0];
-       $y += ($y > 50) ? 1900 : 2000 if $y < 100;
-       return "$y$m$d"; }		 
+ sub {my ($d, $m, $y) = ($_[0] =~ /(\d\d?)\.(\d\d?)\.(\d\d\d?\d?)$/);
+      $y += ($y > 50) ? 1900 : 2000 if defined($y) && $y < 100;
+      return sprintf "%04d%02d%02d", $y, $m, $d;}
 
 =item rxNum
 
@@ -296,8 +296,10 @@ use constant DEFAULT => {
   lockAttempts  => 0,
   rxNum         => qr/^[-+]?\d+(?:\.\d*)?$/,
   rxDate        => qr/^\d\d?\.\d\d?\.\d\d\d?\d?$/,
-  date2str      => sub {my ($d, $m, $y) = split /\./, $_[0];
-		        $y += ($y > 50) ? 1900 : 2000 if $y < 100;
+  date2str      => sub {my ($d, $m, $y) = 
+			  ($_[0] =~ /(\d\d?)\.(\d\d?)\.(\d\d\d?\d?)$/);
+		        $y += ($y > 50) ? 1900 : 2000 
+			  if defined($y) && $y < 100;
 		        return sprintf "%04d%02d%02d", $y, $m, $d;},
   preMatch      => '',
   postMatch     => '',
@@ -322,12 +324,20 @@ sub new {
 
   # create object with default values
   my $self = bless {};
-  $self->{$_} = $args->{$_} || DEFAULT->{$_} 
-    foreach qw(fieldSep recordSep autoNumField autoNumChar autoNum  
-	       rxDate rxNum date2str preMatch postMatch avoidMatchKey);
+  foreach my $option (qw(fieldSep recordSep autoNumField autoNumChar autoNum  
+                         rxDate rxNum date2str preMatch postMatch 
+                         avoidMatchKey)) {
+    $self->{$option} = $args->{$option} || DEFAULT->{$option};
+  }
+
+  # eval to expand escape sequences, for example if fieldSep is given as '\t' 
+  foreach my $option (qw(fieldSep recordSep)) {
+    $self->{$option} = eval qq{qq{$self->{$option}}};
+  }
 
   # field and record separators
   croak "can't use '%' as field separator" if $self->{fieldSep} =~ /%/;
+  
   $self->{recordSepRepl} = $args->{recordSepRepl} || 
                            urlEncode($self->{recordSep});
   $self->{fieldSepRepl} = $args->{fieldSepRepl} || 
@@ -368,12 +378,14 @@ sub new {
   $. = 0;	# setting line counter to zero for first dataline
 
 
-  # closure which takes a (already chomped) line and returns a record
+  # create a closure which takes a (already chomped) line and returns a record
+  my %tmp; # copy some attributes of $self in order to avoid a cyclic ref
+  $tmp{$_} = $self->{$_} foreach qw/rxFieldSep fieldSepRepl fieldSep ht/;
   $self->{mkRecord} = sub {
-    my @vals = split $self->{rxFieldSep}, $_[0], -1;
-    s/$self->{fieldSepRepl}/$self->{fieldSep}/g foreach @vals;
-    return $self->{ht}->new(@vals);
-  };
+     my @vals = split $tmp{rxFieldSep}, $_[0], -1;
+     s/$tmp{fieldSepRepl}/$tmp{fieldSep}/g foreach @vals;
+     return $tmp{ht}->new(@vals);
+   };
 
   return $self;
 }

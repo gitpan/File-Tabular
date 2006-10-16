@@ -4,6 +4,8 @@ no warnings 'uninitialized';
 
 use Test::More tests => 30 ;
 
+diag( "Testing File::Tabular $File::Tabular::VERSION, Perl $], $^X" );
+
 my $tmpJournal = "tmpJournal.txt";
 
 BEGIN {use_ok("File::Tabular");}
