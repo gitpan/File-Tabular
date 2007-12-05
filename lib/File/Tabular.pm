@@ -10,7 +10,7 @@ package File::Tabular;
 
 
 
-our $VERSION = "0.70"; 
+our $VERSION = "0.71"; 
 
 use strict;
 use warnings;
@@ -20,7 +20,7 @@ use Carp;
 # use Carp::Assert; # dropped because not really needed and not in Perl core
 use Fcntl ':flock';
 use Hash::Type;
-use Search::QueryParser;
+use Search::QueryParser 0.92;
 use File::Temp;
 
 =head1 NAME
@@ -158,6 +158,7 @@ from the following list :
 =item fieldSep
 
 field separator : any character except '%' ('|' by default).
+Escape sequences like C<\t> are admitted.
 
 =item recordSep
 
@@ -391,7 +392,8 @@ sub new {
 }
 
 
-sub _open { # stupid : because of 'open' funny prototyping, cannot pass an array directly
+sub _open { # stupid : because of 'open' strange prototyping, 
+            # cannot pass an array directly
   my $result = (ref $_[1] eq 'GLOB') ? $_[0] = $_[1]                         : 
                @_ > 3                ? open($_[0], $_[1], $_[2], @_[3..$#_]) :
                @_ > 2                ? open($_[0], $_[1], $_[2])             : 
@@ -977,7 +979,7 @@ C<Search::QueryParser::parse>
 a string of shape C<< K_E_Y : value >> (without any spaces before
 or after ':'). This will be compiled into
 a regex matching C<value> in the first column.
-The funny spelling is meant to avoid collision with a real field 
+The special spelling is meant to avoid collision with a real field 
 hypothetically named 'KEY'.
 
 =item *
@@ -986,7 +988,7 @@ a string that will be analyzed through C<Search::QueryParser>, and
 then compiled into a filter function. The query string can contain
 boolean combinators, parenthesis, comparison operators,  etc., as 
 documented in L<Search::QueryParser>. The optional second argument
-I<implicitPLus> is passed to C<Search::QueryParser::parse> ;
+I<implicitPlus> is passed to C<Search::QueryParser::parse> ;
 if true, an implicit '+' is added in front of every
 query item (therefore the whole query is a big AND).
 
@@ -1029,6 +1031,15 @@ L</new> method). Depending on these tests, the subquery is translated
 into a string comparison, a numerical comparison, or a date
 comparison (more precisely, C<< {date2str($a) cmp date2str($b)} >>).
 
+
+=item set of integers
+
+Operator C<#> means comparison with a set of integers; internally
+this is implemented with a bit vector. So query
+C<Id#2,3,5,7,11,13,17> will return records where
+field C<Id> contains one of the listed integers. 
+The field name may be omitted if it is the first
+field (usually the key field).
 
 =item pre/postMatch
 
@@ -1142,6 +1153,30 @@ sub _cplSubQ {
 	      return $noHighlights ? "($src =~ m[$s]i)" :
 		"($src =~ s[$s][$self->{preMatch}\$&$self->{postMatch}]ig)";
 	      };
+
+
+
+    /^#$/   # compare source with a list of numbers
+      and do {
+        my $has_state = eval "use feature 'state'; 1"; # true from Perl 5.10
+        my $decl = $has_state ? "use feature 'state'; state \$numvec" 
+                              : "my \$numvec if 0"; # undocumented hack
+
+        # build a block that at first call creates a bit vector; then at 
+        # each call, the data source is compared with the bit vector
+        return qq{
+          do {
+            $decl;
+            no warnings qw/uninitialized numeric/;
+            \$numvec or do {
+              my \$nums = q{$subQ->{value}};
+              vec(\$numvec, \$_, 1) = 1 for (\$nums =~ /\\d+/g);
+            };
+            vec(\$numvec, int($src), 1);
+          }
+        };
+      };
+
 
     # for all other ops, $subQ->{value} must be a scalar
     # assert(not ref $subQ->{value}) if DEBUG; 
